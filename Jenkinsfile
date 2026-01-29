@@ -1,72 +1,79 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    DOCKER_ID = "dorvs"
-    CAST_IMAGE = "cast-service"
-    MOVIE_IMAGE = "movie-service"
-    TAG = "${BRANCH_NAME}-${BUILD_NUMBER}"
-    DOCKER_CREDS = credentials("dockerhub-credentials")
-    KUBECONFIG = credentials('kubeconfig-dev') // fichier kubeconfig avec token ServiceAccount
-  }
-
-  stages {
-
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
-    }
-    
-    stage('Build Docker Images') {
-      steps {
-        sh '''
-        docker build -t $DOCKER_ID/$CAST_IMAGE:$TAG cast-service
-        docker build -t $DOCKER_ID/$MOVIE_IMAGE:$TAG movie-service
-        '''
-      }
+    environment {
+        DOCKER_ID = "dorvs"
+        CAST_IMAGE = "cast-service"
+        MOVIE_IMAGE = "movie-service"
+        TAG = "${BRANCH_NAME}-${BUILD_NUMBER}"
+        DOCKER_CREDS = credentials("dockerhub-credentials")
+        // KUBECONFIG utilisé si Jenkins est hors cluster (Secret File dans Jenkins)
+        KUBECONFIG = credentials('kubeconfig-dev')
     }
 
-    stage('Push Docker Images') {
-      steps {
-        sh '''
-        echo $DOCKER_CREDS_PSW | docker login -u $DOCKER_CREDS_USR --password-stdin
-        docker push $DOCKER_ID/$CAST_IMAGE:$TAG
-        docker push $DOCKER_ID/$MOVIE_IMAGE:$TAG
-        '''
-      }
-    }
+    stages {
 
-    stage('Deploy Dev / QA / Staging') {
-      steps {
-        script {
-          echo "Deploying to dev namespace..."
-          sh '''
-          # Vérifier la connexion au cluster
-          kubectl get ns
-
-          # Vérifier que le ServiceAccount a les droits
-          kubectl auth can-i create deployment -n dev
-
-          # Déployer avec Helm en utilisant les tags construits dynamiquement
-          helm upgrade --install app charts \
-              --namespace dev \
-              --create-namespace \
-              --set cast.image.tag=$TAG \
-              --set movie.image.tag=$TAG
-          '''
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
-      }
-    }
 
-    stage('Deploy Production') {
-      when {
-        expression { return false } // Logique pour production
-      }
-      steps {
-        echo "Skipping production due to dev failure"
-      }
-    }
+        stage('Build Docker Images') {
+            steps {
+                sh '''
+                docker build -t $DOCKER_ID/$CAST_IMAGE:$TAG cast-service
+                docker build -t $DOCKER_ID/$MOVIE_IMAGE:$TAG movie-service
+                '''
+            }
+        }
 
-  } // fin stages
-} // fin pipeline
+        stage('Push Docker Images') {
+            steps {
+                sh '''
+                echo $DOCKER_CREDS_PSW | docker login -u $DOCKER_CREDS_USR --password-stdin
+                docker push $DOCKER_ID/$CAST_IMAGE:$TAG
+                docker push $DOCKER_ID/$MOVIE_IMAGE:$TAG
+                '''
+            }
+        }
+
+        stage('Deploy Dev / QA / Staging') {
+            steps {
+                script {
+                    echo "Deploying to dev namespace..."
+
+                    sh '''
+                    # Vérifier si Jenkins est dans le cluster ou utilise kubeconfig
+                    if [ -f "$KUBECONFIG" ]; then
+                        echo "Using kubeconfig from credentials"
+                    else
+                        echo "Running inside the cluster with in-cluster ServiceAccount"
+                    fi
+
+                    # Vérifier l’accès Kubernetes
+                    kubectl get ns
+                    kubectl auth can-i create deployment -n dev
+
+                    # Déploiement Helm avec tags dynamiques
+                    helm upgrade --install app charts \
+                        --namespace dev \
+                        --create-namespace \
+                        --set cast.image.tag=$TAG \
+                        --set movie.image.tag=$TAG
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Production') {
+            when {
+                expression { return false } // modifier selon logique Prod
+            }
+            steps {
+                echo "Skipping production deployment"
+            }
+        }
+
+    } // fin stages
+}
