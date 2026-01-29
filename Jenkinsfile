@@ -36,41 +36,40 @@ pipeline {
       }
     }
 
-    stage('Deploy Dev / QA / Staging') {
-      environment {
-          DOCKER_TAG = "v.${BUILD_ID}.0"
-}
-      when {
+  stage('Deploy Dev / QA / Staging') {
+    environment {
+        DOCKER_TAG = "v.${BUILD_ID}.0"  // <- définit la variable correctement
+    }
+    when {
         not { branch 'master' }
-      }
-      steps {
+    }
+    steps {
         sh """
         helm upgrade --install app charts \
           --namespace dev \
           --create-namespace \
-          --set cast.image.tag=$TAG \
-          --set movie.image.tag=$TAG
+          --set cast.image.tag=$DOCKER_TAG \
+          --set movie.image.tag=$DOCKER_TAG
         """
-      }
     }
+}
 
-    stage('Deploy Production') {
-      when {
+  stage('Deploy Production') {
+    when {
         branch 'master'
-      }
-      input {
+    }
+    input {
         message "Déployer en production ?"
         ok "Déployer"
-      }
-      steps {
+    }
+    steps {
         sh """
         helm upgrade --install app charts \
           --namespace prod \
           --create-namespace \
-          --set cast.image.tag=$TAG \
-          --set movie.image.tag=$TAG
+          --set cast.image.tag=$DOCKER_TAG \
+          --set movie.image.tag=$DOCKER_TAG
         """
-      }
-    }
   }
+ }
 }
