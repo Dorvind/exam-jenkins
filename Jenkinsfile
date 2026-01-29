@@ -2,72 +2,101 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_USER = "dockerhub_user"
-        IMAGE_NAME = "app_name"
-        DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
+        DOCKER_ID = "dorvs"
+        DOCKER_IMAGE = "dora-examen"
+        DOCKER_TAG = "v.${BUILD_ID}.0"
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Docker Build') {
             steps {
-                git branch: "${env.BRANCH_NAME}", url: 'https://github.com/Dorvind/exam-jenkins.git'
+                sh '''
+                    docker rm -f jenkins || true
+                    docker build -t $DOCKER_ID/$DOCKER_IMAGE:$DOCKER_TAG .
+                    sleep 6
+                '''
             }
         }
 
-        stage('Tests') {
+        stage('Docker Run') {
             steps {
-                sh 'docker-compose up -d'
-                sh 'docker-compose exec app pytest'
-                sh 'docker-compose down'
+                sh '''
+                    docker run -d -p 80:80 --name jenkins $DOCKER_ID/$DOCKER_IMAGE:$DOCKER_TAG
+                    sleep 10
+                '''
             }
         }
 
-        stage('Build Image') {
+        stage('Test Acceptance') {
             steps {
-                sh """
-                docker build -t $DOCKERHUB_USER/$IMAGE_NAME:${BRANCH_NAME}-${BUILD_NUMBER} .
-                """
+                sh 'curl localhost'
             }
         }
 
-        stage('Push Image') {
+        stage('Docker Push') {
+            environment {
+                DOCKER_PASS = credentials("DOCKER_HUB_PASS")
+            }
             steps {
-                sh """
-                echo $DOCKER_CREDENTIALS_PSW | docker login -u $DOCKER_CREDENTIALS_USR --password-stdin
-                docker push $DOCKERHUB_USER/$IMAGE_NAME:${BRANCH_NAME}-${BUILD_NUMBER}
-                """
+                sh '''
+                    echo $DOCKER_PASS | docker login -u $DOCKER_ID --password-stdin
+                    docker push $DOCKER_ID/$DOCKER_IMAGE:$DOCKER_TAG
+                '''
             }
         }
 
-        stage('Deploy Dev / QA / Staging') {
-            when {
-                not { branch 'master' }
+        stage('Deployments') {
+            environment {
+                KUBECONFIG = credentials("config")
             }
             steps {
-                sh """
-                helm upgrade --install app helm-chart \
-                --namespace ${BRANCH_NAME} \
-                --set image.tag=${BRANCH_NAME}-${BUILD_NUMBER}
-                """
+                script {
+                    def namespaces = ["dev", "staging"]
+                    for (ns in namespaces) {
+                        sh """
+                            rm -Rf .kube
+                            mkdir .kube
+                            cat $KUBECONFIG > .kube/config
+                            cp fastapi/values.yaml values.yml
+                            sed -i "s+tag.*+tag: ${DOCKER_TAG}+g" values.yml
+                            helm upgrade --install app fastapi --values=values.yml --namespace $ns --create-namespace
+                        """
+                    }
+                }
             }
         }
 
         stage('Deploy Production') {
-            when {
-                branch 'master'
-            }
-            input {
-                message "Déployer en PRODUCTION ?"
-                ok "Déployer"
+            environment {
+                KUBECONFIG = credentials("config")
             }
             steps {
-                sh """
-                helm upgrade --install app helm-chart \
-                --namespace prod \
-                --set image.tag=master-${BUILD_NUMBER}
-                """
+                timeout(time: 15, unit: 'MINUTES') {
+                    input message: 'Do you want to deploy in production?', ok: 'Yes'
+                }
+                sh '''
+                    rm -Rf .kube
+                    mkdir .kube
+                    cat $KUBECONFIG > .kube/config
+                    cp fastapi/values.yaml values.yml
+                    sed -i "s+tag.*+tag: ${DOCKER_TAG}+g" values.yml
+                    helm upgrade --install app fastapi --values=values.yml --namespace prod --create-namespace
+                '''
             }
+        }
+    }
+
+    post {
+        always {
+            echo "Cleaning up Docker containers"
+            sh 'docker rm -f jenkins || true'
+        }
+        success {
+            echo "Pipeline finished successfully!"
+        }
+        failure {
+            echo "Pipeline failed. Check logs for errors."
         }
     }
 }
