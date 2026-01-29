@@ -7,6 +7,7 @@ pipeline {
     MOVIE_IMAGE = "movie-service"
     TAG = "${BRANCH_NAME}-${BUILD_NUMBER}"
     DOCKER_CREDS = credentials("dockerhub-credentials")
+    KUBECONFIG = credentials('kubeconfig-dev') // fichier kubeconfig avec token ServiceAccount
   }
 
   stages {
@@ -37,35 +38,35 @@ pipeline {
     }
 
     stage('Deploy Dev / QA / Staging') {
-            steps {
-                script {
-                    echo "Deploying to dev namespace..."
-                    sh '''
-                    # Vérifier la connexion au cluster
-                    kubectl get ns
+      steps {
+        script {
+          echo "Deploying to dev namespace..."
+          sh '''
+          # Vérifier la connexion au cluster
+          kubectl get ns
 
-                    # Vérifier les droits du ServiceAccount
-                    kubectl auth can-i create deployment -n dev
+          # Vérifier que le ServiceAccount a les droits
+          kubectl auth can-i create deployment -n dev
 
-                    # Déployer avec Helm
-                    helm upgrade --install app charts \
-                        --namespace dev \
-                        --create-namespace \
-                        --set cast.image.tag=null-25 \
-                        --set movie.image.tag=null-25
-                    '''
-                }
-            }
+          # Déployer avec Helm en utilisant les tags construits dynamiquement
+          helm upgrade --install app charts \
+              --namespace dev \
+              --create-namespace \
+              --set cast.image.tag=$TAG \
+              --set movie.image.tag=$TAG
+          '''
         }
-
-        stage('Deploy Production') {
-            when {
-                expression { return false } // ou logique pour production
-            }
-            steps {
-                echo "Skipping production due to dev failure"
       }
     }
 
-  } // <-- fin stages
-} // <-- fin pipeline
+    stage('Deploy Production') {
+      when {
+        expression { return false } // Logique pour production
+      }
+      steps {
+        echo "Skipping production due to dev failure"
+      }
+    }
+
+  } // fin stages
+} // fin pipeline
