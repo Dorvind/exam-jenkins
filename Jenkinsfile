@@ -37,39 +37,33 @@ pipeline {
     }
 
     stage('Deploy Dev / QA / Staging') {
-      environment {
-        DOCKER_TAG = "${TAG}" // utiliser la même variable que pour le push
-      }
-      when {
-        not { branch 'master' }
-      }
-      steps {
-        sh """
-        helm upgrade --install app charts \
-          --namespace dev \
-          --create-namespace \
-          --set cast.image.tag=$DOCKER_TAG \
-          --set movie.image.tag=$DOCKER_TAG
-        """
-      }
-    }
+            steps {
+                script {
+                    echo "Deploying to dev namespace..."
+                    sh '''
+                    # Vérifier la connexion au cluster
+                    kubectl get ns
 
-    stage('Deploy Production') {
-      when {
-        branch 'master'
-      }
-      input {
-        message "Déployer en production ?"
-        ok "Déployer"
-      }
-      steps {
-        sh """
-        helm upgrade --install app charts \
-          --namespace prod \
-          --create-namespace \
-          --set cast.image.tag=$TAG \
-          --set movie.image.tag=$TAG
-        """
+                    # Vérifier les droits du ServiceAccount
+                    kubectl auth can-i create deployment -n dev
+
+                    # Déployer avec Helm
+                    helm upgrade --install app charts \
+                        --namespace dev \
+                        --create-namespace \
+                        --set cast.image.tag=null-25 \
+                        --set movie.image.tag=null-25
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Production') {
+            when {
+                expression { return false } // ou logique pour production
+            }
+            steps {
+                echo "Skipping production due to dev failure"
       }
     }
 
