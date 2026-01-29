@@ -37,6 +37,9 @@ pipeline {
     }
 
     stage('Deploy Dev / QA / Staging') {
+      environment {
+          DOCKER_TAG = "v.${BUILD_ID}.0"
+}
       when {
         not { branch 'master' }
       }
