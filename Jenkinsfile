@@ -39,32 +39,34 @@ pipeline {
         }
 
         stage('Deploy Dev / QA / Staging') {
-            steps {
-                script {
-                    echo "Deploying to dev namespace..."
+    steps {
+        script {
+            echo "Deploying to dev namespace..."
 
-                    sh '''
-                    # Vérifier si Jenkins est dans le cluster ou utilise kubeconfig
-                    if [ -f "$KUBECONFIG" ]; then
-                        echo "Using kubeconfig from credentials"
-                    else
-                        echo "Running inside the cluster with in-cluster ServiceAccount"
-                    fi
+            withCredentials([file(credentialsId: 'kubeconfig-dev', variable: 'KUBECONFIG')]) {
+                sh '''
+                echo "Using kubeconfig from Jenkins credentials"
+                export KUBECONFIG=$KUBECONFIG
 
-                    # Vérifier l’accès Kubernetes
-                    kubectl get ns
-                    kubectl auth can-i create deployment -n dev
+                # Vérification du kubeconfig
+                head -n 5 $KUBECONFIG
 
-                    # Déploiement Helm avec tags dynamiques
-                    helm upgrade --install app charts \
-                        --namespace dev \
-                        --create-namespace \
-                        --set cast.image.tag=$TAG \
-                        --set movie.image.tag=$TAG
-                    '''
-                }
+                # Vérifier l’accès Kubernetes
+                kubectl get ns
+                kubectl auth can-i create deployment -n dev
+
+                # Déploiement Helm
+                helm upgrade --install app charts \
+                    --namespace dev \
+                    --create-namespace \
+                    --set cast.image.tag=$TAG \
+                    --set movie.image.tag=$TAG
+                '''
             }
         }
+    }
+}
+
 
         stage('Deploy Production') {
             when {
